@@ -3,5 +3,7 @@ paddleocr==3.0.0
 paddlepaddle==3.0.0
 setuptools
 Pillow
-langchain==0.1.20
 pdf2image
+rapidfuzz
+flask
+flask-cors

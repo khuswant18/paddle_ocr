@@ -305,11 +305,22 @@ class FastInvoiceExtractor:
             r'^tel\.?\s*no',  # Phone reference
             r'^\d{3}[-.]\d{3}[-.]\d{4}',  # Phone number
             r'^\d{2}[-/]\d{2}[-/]\d{2,4}$',  # Date
+            r'TIN#?\d+',  # TIN numbers
+            r'\d{3}-\d{3}-\d{3}-\d{5}',  # Full TIN format
         ]
+        
+        # First try to find invoice number near 'N.' prefix (common format)
+        match = re.search(r'\bN\.\s*(\d{4,})', text, re.IGNORECASE)
+        if match:
+            potential = match.group(1)
+            # Make sure it's not part of a TIN
+            if not re.search(r'TIN.*' + re.escape(potential), text, re.IGNORECASE):
+                return potential
         
         # Keywords that might mean invoice number
         inv_keywords = ['invoice', 'inv', 'bill no', 'bill number', 'receipt no', 'receipt', 
-                        'voucher no', 'ref no', 'reference', 'memo no', 'doc no', 'document'] 
+                        'voucher no', 'ref no', 'reference', 'memo no', 'doc no', 'document',
+                        'sales invoice', 'si no', 's\\.?i\\.?\\s*no'] 
         
         for keyword in inv_keywords:
             patterns = [
@@ -337,28 +348,62 @@ class FastInvoiceExtractor:
                             if re.search(r'\d', val):
                                 return val
         
-        # Look for № or # followed by number
-        match = re.search(r'[№#]\s*(\d{4,})', text)
+        # Look for № or # followed by number (but not TIN#)
+        match = re.search(r'(?<!TIN)[№#]\s*(\d{4,})', text, re.IGNORECASE)
         if match:
             return match.group(1)
         
         return ""
     
     def _extract_po_number(self, text: str) -> str:
-        """Extract PO number."""
+        """Extract PO number - check line after PO No: label."""
+        lines = text.split('\n')
+        
+        # First try: Look for PO No: followed by number on same or next line
+        for i, line in enumerate(lines):
+            line_lower = line.lower().strip()
+            if re.match(r'^p\.?\s*o\.?\s*n?o?\.?[:\s]*$', line_lower):
+                # PO No: is on its own line, check next line
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    # Extract number from next line
+                    num_match = re.search(r'^([A-Z0-9\-]+)', next_line, re.IGNORECASE)
+                    if num_match:
+                        val = num_match.group(1)
+                        if len(val) >= 3 and re.search(r'\d', val):
+                            return val
+        
+        # Second try: PO No: followed by value on same line
         patterns = [
-            r'p\.?\s*o\.?\s*n?o?[\s.:]*([A-Z0-9\-]+)',
+            r'p\.?\s*o\.?\s*n?o?\.?[\s:]+([A-Z0-9\-]+)',
+            r'po\s*no\.[\s:]*([A-Z0-9\-]+)',
             r'purchase\s*order[\s.:]*([A-Z0-9\-]+)',
-            r'order[\s#.:no]*[:\s]+([A-Z0-9\-]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                po_val = match.group(1).strip()
+                # Skip common words
+                if po_val.lower() not in ['no', 'number', 'date', 'order', '']:
+                    return po_val
         return ""
     
     def _extract_date(self, text: str, field: str) -> str:
         """Extract date for a specific field."""
+        
+        # Skip footer dates (ATP = Authority to Print)
+        text_lines = text.split('\n')
+        relevant_text = []
+        for line in text_lines:
+            line_lower = line.lower()
+            # Skip footer lines with ATP, printer info, etc.
+            if any(skip in line_lower for skip in ['atp', 'authority to print', 'bir authority', 
+                                                     'printer', 'accreditation', 'customer\'s copy',
+                                                     'loose leaf permit', 'rda rr']):
+                continue
+            relevant_text.append(line)
+        
+        text = '\n'.join(relevant_text)
         
         # More specific date patterns
         date_patterns = [
@@ -367,7 +412,7 @@ class FastInvoiceExtractor:
             # YYYY/MM/DD or YYYY-MM-DD
             r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
             # DD Month YYYY or Month DD, YYYY
-            r'(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*\d{2,4})',
+            r'(\d{1,2}\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*\d{2,4})'
             r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}[,\s]+\d{2,4})',
         ]
         
@@ -505,11 +550,15 @@ class FastInvoiceExtractor:
             if i < 8 and not current_section:
                 # Look for company-like names
                 if is_valid_party_line(line_stripped):
+                    # Use word boundaries for skip words to avoid false matches (e.g., "tin" in "Martin")
+                    skip_pattern = r'\b(' + '|'.join(['invoice', 'date', 'tel', 'fax', 'tin', 'vat', 'gstin']) + r')\b'
+                    has_skip = re.search(skip_pattern, line_lower)
+                    
                     if (any(ind in line_lower for ind in ['inc', 'ltd', 'llc', 'pvt', 'corp', 'marketing', 'enterprise', 'trading', 'company', 'industries']) or
-                        (len(line_stripped) > 5 and not any(skip in line_lower for skip in ['invoice', 'date', 'tel', 'fax', 'address', 'tin', 'vat', 'gstin']))):
+                        (len(line_stripped) > 5 and not has_skip)):
                         header_lines.append(line_stripped)
             
-            # Add to current section if valid
+            # Add to current section if valid 
             if current_section == 'seller' and len(seller_lines) < 5:
                 if is_valid_party_line(line_stripped):
                     if not any(skip in line_lower for skip in ['tel', 'fax', 'phone', 'email', 'tin', 'vat', 'date', 'invoice', 'gstin']):
@@ -525,11 +574,39 @@ class FastInvoiceExtractor:
         
         # Clean up and assign extracted data
         if seller_lines:
-            # First line should be company name
-            invoice.seller_name = seller_lines[0]
-            if len(seller_lines) > 1:
-                # Join remaining lines as address, filtering out duplicates
-                addr_lines = [l for l in seller_lines[1:4] if l.lower() != seller_lines[0].lower()]
+            # Check if first line is partial name and another line completes it
+            # E.g., "CENTURIAN" followed later by "INTERNATIONAL CORPORATION"
+            first_line = seller_lines[0]
+            company_suffix = None
+            company_suffix_idx = None
+            
+            # Look for company suffix lines (CORPORATION, LTD, etc.) in next few lines
+            if len(first_line.split()) <= 2:  # First line is short (1-2 words)
+                for i, line in enumerate(seller_lines[1:4], 1):
+                    line_upper = line.upper()
+                    # Check if this line is just a company suffix
+                    if (any(kw in line_upper for kw in ['CORPORATION', 'CORP', 'LTD', 'LIMITED', 'INC', 'LLC', 'PVT']) and
+                        len(line.split()) <= 3 and  # Short line
+                        not any(skip in line.lower() for skip in ['subdivision', 'street', 'road', 'subd', 'avenue', 'blvd', 'tel', 'fax', 'phone'])):
+                        company_suffix = line
+                        company_suffix_idx = i
+                        break
+            
+            if company_suffix:
+                invoice.seller_name = f"{first_line} {company_suffix}"
+                # Address lines are between first_line and company_suffix, plus any after
+                address_lines = []
+                for i, line in enumerate(seller_lines[1:], 1):
+                    if i != company_suffix_idx:  # Skip the company suffix line
+                        address_lines.append(line)
+                address_lines = address_lines[:3]  # Max 3 address lines
+            else:
+                invoice.seller_name = first_line
+                address_lines = seller_lines[1:4]
+            
+            # Join remaining lines as address
+            if address_lines:
+                addr_lines = [l for l in address_lines if l.lower() not in invoice.seller_name.lower()]
                 invoice.seller_address = ', '.join(addr_lines)
         
         if buyer_lines:
@@ -814,7 +891,8 @@ class FastInvoiceExtractor:
         product_keywords = ['candy', 'jelly', 'chocolate', 'flavor', 
                            'biscuit', 'gum', 'powder', 'fruit', 'roll', 'stick', 
                            'cup', 'pop', 'bubble', 'yogurt', 'mango', 'orange', 
-                           'strawberry', 'milk', 'cola', 'sofee', 'asstd']
+                           'strawberry', 'milk', 'cola', 'sofee', 'asstd', 'pad', 
+                           'paper', 'grade', 'writing', 'wrtg']
         
         # Find where totals section starts
         totals_start_idx = len(lines)
@@ -827,11 +905,28 @@ class FastInvoiceExtractor:
                 totals_start_idx = i
                 break
         
+        # Find where item table likely starts (after "Sold To" section)
+        items_start_idx = 0
+        items_start_keywords = ['qty', 'unit', 'item description', 'description', 
+                               'quantity', 'particulars', 'product', 'item']
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            # Look for table headers
+            if any(kw in line_lower for kw in items_start_keywords):
+                # Check if next few lines might have items
+                if i + 2 < len(lines):
+                    items_start_idx = i + 1
+                    break
+        
         # Collect products and monetary values
         product_info = []  # (line_idx, description)
         monetary_values = []  # (line_idx, value)
         
         for i, line in enumerate(lines):
+            # Skip lines before item table starts
+            if i < items_start_idx:
+                continue
+                
             if i >= totals_start_idx:
                 break
                 
@@ -841,12 +936,25 @@ class FastInvoiceExtractor:
             
             line_lower = line.lower()
             
-            # Skip headers and metadata
+            # Skip headers, metadata, addresses, and footer text
             skip_words = ['total', 'subtotal', 'quantity', 'description', 'unit', 
                          'amount', 'signature', 'date:', 'sold to', 'terms',
                          'unitprice', 'remarks', 'vatable', 'vat-exempt', 'less:',
-                         'add:', 'tin:', 'address', 'business', 'cardholder']
+                         'add:', 'tin:', 'address', 'business', 'cardholder',
+                         'street', 'subdivision', 'city', 'province', 'bulacan', 
+                         'iloilo', 'philippines', 'tel', 'fax', 'corporation',
+                         'accreditation', 'printer', 'arranged', 'buyer', 'seller',
+                         'attn:', 'po no', 'customer code', 'cancel', 'approve',
+                         'delivery', 'schedule', 'store order', 'for:', 'wait']
             if any(kw in line_lower for kw in skip_words):
+                continue
+            
+            # Skip lines that look like addresses (contain house numbers + street names)
+            if re.search(r'\b\d{3,5}\s+[A-Z][a-z]+', line):  # "5023 Miagao" pattern
+                continue
+            
+            # Skip lines with VAT/TIN numbers
+            if re.search(r'(vat|tin)[#\s]*\d{3}[-\d]+', line_lower):
                 continue
             
             # Check if line is a product description
@@ -1055,51 +1163,127 @@ class FastInvoiceExtractor:
         return None
     
     def _extract_amounts(self, text: str, invoice: InvoiceData):
-        """Extract all amounts using fuzzy matching."""
+        """Extract all amounts with better VAT handling."""
         
         text_lower = text.lower()
+        lines = text.split('\n')
         
-        # Amount fields to extract
-        amount_fields = [
-            ('subtotal', 'subtotal'),
-            ('discount', 'discount'),
-            ('cgst', 'cgst'),
-            ('sgst', 'sgst'),
-            ('igst', 'igst'),
-            ('tax_total', 'tax_total'),
-            ('shipping', 'shipping'),
-            ('grand_total', 'grand_total'),
-            ('amount_paid', 'amount_paid'),
-            ('balance_due', 'balance_due'),
-        ]
+        # Special handling for common VAT invoice formats
+        # Look for: "Total Sales (VAT Inclusive)", "Amount: Net of VAT", "VAT", "TOTAL AMOUNT DUE"
         
-        for attr_name, field_name in amount_fields:
-            keywords = self.matcher.KEYWORDS.get(field_name, [])
+        for i, line in enumerate(lines):
+            line_clean = line.strip().lower()
             
-            for keyword in keywords:
-                # Find keyword and extract following amount (fuzzy)
-                # Allow for variations in spacing and separators
-                pattern = rf'{re.escape(keyword)}[^0-9₹$]*[₹$Rs.\s]*(\d{{1,3}}(?:[,\s]?\d{{2,3}})*(?:\.\d{{1,2}})?)'
-                match = re.search(pattern, text_lower)
-                
-                if match:
+            # Grand Total / Total Amount Due / Total Sales (VAT Inclusive)
+            if re.search(r'(total\s+amount\s+due|grand\s+total|total\s+sales.*inclusive)', line_clean):
+                # Look for amount on same line or next lines
+                amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', line)
+                if amount_match and invoice.grand_total == 0:
                     try:
-                        amount = float(match.group(1).replace(',', '').replace(' ', ''))
-                        current = getattr(invoice, attr_name)
-                        if current == 0:  # Don't overwrite
-                            setattr(invoice, attr_name, amount)
-                        break
-                    except ValueError:
-                        continue
+                        amount_str = amount_match.group(1).replace(',', '').strip()
+                        # Ensure no newlines or invalid characters
+                        if '\n' not in amount_str and '\r' not in amount_str:
+                            invoice.grand_total = float(amount_str)
+                    except (ValueError, AttributeError):
+                        pass
+                else:
+                    # Check next few lines
+                    for j in range(i+1, min(i+3, len(lines))):
+                        amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', lines[j])
+                        if amount_match and invoice.grand_total == 0:
+                            try:
+                                amount_str = amount_match.group(1).replace(',', '').strip()
+                                if '\n' not in amount_str and '\r' not in amount_str:
+                                    invoice.grand_total = float(amount_str)
+                                    break
+                            except (ValueError, AttributeError):
+                                pass
+            
+            # Subtotal / Net of VAT / VATable Sales
+            if re.search(r'(net\s*of\s*vat|vatable\s+sales|amount.*net)', line_clean):
+                amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', line)
+                if amount_match and invoice.subtotal == 0:
+                    try:
+                        amount_str = amount_match.group(1).replace(',', '').strip()
+                        if '\n' not in amount_str and '\r' not in amount_str:
+                            invoice.subtotal = float(amount_str)
+                    except (ValueError, AttributeError):
+                        pass
+                else:
+                    # Check next line
+                    if i + 1 < len(lines):
+                        amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', lines[i + 1])
+                        if amount_match and invoice.subtotal == 0:
+                            try:
+                                amount_str = amount_match.group(1).replace(',', '').strip()
+                                if '\n' not in amount_str and '\r' not in amount_str:
+                                    invoice.subtotal = float(amount_str)
+                            except (ValueError, AttributeError):
+                                pass
+            
+            # VAT / Tax amount
+            if re.search(r'^(add:\s*)?vat\s*$', line_clean) or (line_clean == 'vat' or line_clean == 'tax'):
+                # Check if line before says "Add:" or "Less:"
+                is_add = i > 0 and 'add' in lines[i-1].lower()
+                is_less = i > 0 and 'less' in lines[i-1].lower()
+                
+                # Look for amount on next line
+                if i + 1 < len(lines):
+                    amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', lines[i + 1])
+                    if amount_match:
+                        try:
+                            amount_str = amount_match.group(1).replace(',', '').strip()
+                            if '\n' not in amount_str and '\r' not in amount_str:
+                                val = float(amount_str)
+                                if is_add and invoice.tax_total == 0:
+                                    invoice.tax_total = val
+                                elif is_less and invoice.discount == 0:
+                                    invoice.discount = val
+                                elif invoice.tax_total == 0:  # Default: treat as tax
+                                    invoice.tax_total = val
+                        except (ValueError, AttributeError):
+                            pass
+            
+            # Less: Discount / Less: VAT (when VAT is treated as discount)
+            if re.search(r'less.*discount|less.*vat', line_clean):
+                amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', line)
+                if amount_match and invoice.discount == 0:
+                    try:
+                        amount_str = amount_match.group(1).replace(',', '').strip()
+                        if '\n' not in amount_str and '\r' not in amount_str:
+                            invoice.discount = float(amount_str)
+                    except (ValueError, AttributeError):
+                        pass
+                else:
+                    # Check next line
+                    if i + 1 < len(lines):
+                        amount_match = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', lines[i + 1])
+                        if amount_match and invoice.discount == 0:
+                            try:
+                                amount_str = amount_match.group(1).replace(',', '').strip()
+                                if '\n' not in amount_str and '\r' not in amount_str:
+                                    invoice.discount = float(amount_str)
+                            except (ValueError, AttributeError):
+                                pass
         
-        # If no grand total found, look for largest reasonable amount
+        # Fallback: If no grand total found, look for largest reasonable amount
         if invoice.grand_total == 0:
             amounts = self.patterns['amount'].findall(text)
-            amounts = [float(a.replace(',', '').replace(' ', '')) for a in amounts if a]
-            # Filter out unreasonably large numbers (probably phone numbers etc)
-            amounts = [a for a in amounts if a < 10000000]
-            if amounts:
-                invoice.grand_total = max(amounts)
+            # Clean and filter amounts - remove any with newlines or whitespace
+            cleaned_amounts = []
+            for a in amounts:
+                try:
+                    # Remove commas and spaces, check for newlines
+                    clean_val = a.replace(',', '').replace(' ', '').strip()
+                    if '\n' not in clean_val and '\r' not in clean_val:
+                        val = float(clean_val)
+                        if 100 < val < 10000000:  # Reasonable invoice range
+                            cleaned_amounts.append(val)
+                except (ValueError, AttributeError):
+                    continue
+            
+            if cleaned_amounts:
+                invoice.grand_total = max(cleaned_amounts)
     
     def _extract_bank_details(self, text: str, text_upper: str, invoice: InvoiceData):
         """Extract bank details."""

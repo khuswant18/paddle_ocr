@@ -1,0 +1,23 @@
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/paddle/utils/cpp_extension/extension_utils.py:711: UserWarning: No ccache found. Please be aware that recompiling all source files may be required. You can download and install ccache from: https://github.com/ccache/ccache/blob/master/doc/INSTALL.md
+  warnings.warn(warning_message)
+[32mCreating model: ('PP-OCRv5_mobile_det', None)[0m
+[32mUsing official model (PP-OCRv5_mobile_det), the model files will be automatically downloaded and saved in /Users/khuswantrajpurohit/.paddlex/official_models.[0m
+[32mCreating model: ('PP-OCRv5_mobile_rec', None)[0m
+[32mUsing official model (PP-OCRv5_mobile_rec), the model files will be automatically downloaded and saved in /Users/khuswantrajpurohit/.paddlex/official_models.[0m
+OCR_UTILS: PaddleOCR instance initialized for lang='en'.
+Starting OCR Invoice Extractor API...
+API will be available at http://localhost:5000
+ * Serving Flask app 'app'
+ * Debug mode: on
+[2025-12-10 21:52:35,426] [    INFO] _internal.py:97 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+[2025-12-10 21:52:35,426] [    INFO] _internal.py:97 - [33mPress CTRL+C to quit[0m
+[2025-12-10 21:52:35,427] [    INFO] _internal.py:97 -  * Restarting with stat
+/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/site-packages/paddle/utils/cpp_extension/extension_utils.py:711: UserWarning: No ccache found. Please be aware that recompiling all source files may be required. You can download and install ccache from: https://github.com/ccache/ccache/blob/master/doc/INSTALL.md
+  warnings.warn(warning_message)
+[32mCreating model: ('PP-OCRv5_mobile_det', None)[0m
+[32mUsing official model (PP-OCRv5_mobile_det), the model files will be automatically downloaded and saved in /Users/khuswantrajpurohit/.paddlex/official_models.[0m
+[32mCreating model: ('PP-OCRv5_mobile_rec', None)[0m
+[32mUsing official model (PP-OCRv5_mobile_rec), the model files will be automatically downloaded and saved in /Users/khuswantrajpurohit/.paddlex/official_models.[0m
+[2025-12-10 21:52:38,724] [ WARNING] _internal.py:97 -  * Debugger is active!
+[2025-12-10 21:52:38,770] [    INFO] _internal.py:97 -  * Debugger PIN: 129-182-308
