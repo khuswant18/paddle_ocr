@@ -1,19 +1,60 @@
 from paddleocr import PaddleOCR
 import os
+from pdf2image import convert_from_path
+import tempfile
 
 # Initialize PaddleOCR with determined working settings
 ocr = PaddleOCR(lang='en', use_textline_orientation=False, use_doc_orientation_classify=False, use_doc_unwarping=False)
 
-image_path = 'screenshot.png' # Path to the image file for OCR
+input_path = 'sample1.jpg' # Path to the image or PDF file for OCR
 # Directory to save visualized OCR results from the predict API
 output_dir = 'ocr_output_predict'
 os.makedirs(output_dir, exist_ok=True) # Create output directory if it doesn't exist
 
-print(f"Performing OCR on: {image_path} using ocr.predict() API")
-# ocr.predict() returns a list of OCRResult objects.
-# For a single image, this list usually contains one OCRResult object.
-# This OCRResult object then contains the actual recognition data.
-prediction_results = ocr.predict(image_path)
+# Function to check if file is PDF
+def is_pdf(file_path):
+    return file_path.lower().endswith('.pdf')
+
+# Function to convert PDF to images
+def pdf_to_images(pdf_path):
+    return convert_from_path(pdf_path)
+
+# Get list of images to process
+temp_dir = None
+if is_pdf(input_path):
+    if not os.path.exists(input_path):
+        print(f"Error: PDF file '{input_path}' does not exist.")
+        exit(1)
+    print(f"Converting PDF: {input_path} to images")
+    try:
+        images = pdf_to_images(input_path)
+        temp_dir = tempfile.mkdtemp()
+        image_paths = []
+        for i, image in enumerate(images):
+            img_path = os.path.join(temp_dir, f'page_{i+1}.jpg')
+            image.save(img_path, 'JPEG')
+            if os.path.exists(img_path):
+                image_paths.append(img_path)
+            else:
+                print(f"Warning: Failed to save page {i+1}")
+    except Exception as e:
+        print(f"Error converting PDF: {e}")
+        exit(1)
+else:
+    if not os.path.exists(input_path):
+        print(f"Error: File '{input_path}' does not exist.")
+        exit(1)
+    image_paths = [input_path]
+
+print(f"Performing OCR on: {input_path} using ocr.predict() API")
+all_results = [] 
+for img_path in image_paths:
+    print(f"Processing: {os.path.basename(img_path)}")
+    prediction_results = ocr.predict(img_path)
+    if prediction_results:
+        all_results.extend(prediction_results)
+
+prediction_results = all_results
 
 if prediction_results:
     print("\nOCR Prediction Results:")
@@ -65,3 +106,8 @@ if prediction_results:
 
 else: # This corresponds to `if prediction_results:`
     print("OCR (ocr.predict() API) returned no results or an empty result (initial check).")
+
+# Cleanup temp directory if used
+if temp_dir and os.path.exists(temp_dir):
+    import shutil
+    shutil.rmtree(temp_dir)

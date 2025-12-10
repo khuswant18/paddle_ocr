@@ -1,5 +1,4 @@
 import os
-# import sys # No longer needed for _MEIPASS logic here
 from paddleocr import PaddleOCR
 from typing import List, Optional
 
@@ -31,7 +30,7 @@ class OCRProcessor:
         """
         if lang != self.current_lang:
             self.current_lang = lang
-            self._initialize_ocr_instance() # Re-initialize with the new language
+            self._initialize_ocr_instance() 
             print(f"OCR_UTILS: OCR language changed to: {lang}")
 
     def process_image(self, image_path: str) -> Optional[str]:
@@ -52,8 +51,6 @@ class OCRProcessor:
             return None
 
         try:
-            # predict() is expected to return List[paddlex.inference.pipelines.ocr.result.OCRResult]
-            # based on the log: "First element type: <class 'paddlex.inference.pipelines.ocr.result.OCRResult'>"
             prediction_results = self.ocr_instance.predict(image_path)
 
             if not prediction_results:
@@ -63,7 +60,7 @@ class OCRProcessor:
             all_extracted_texts: List[str] = []
             
             print(f"OCR_UTILS: Received {len(prediction_results)} result objects from predict().")
-            for i, res_obj in enumerate(prediction_results): # res_obj is a paddlex OCRResult
+            for i, res_obj in enumerate(prediction_results):
                 item_text = None
                 print(f"OCR_UTILS: Processing result object {i+1}, type: {type(res_obj)}")
                 try:
@@ -85,12 +82,10 @@ class OCRProcessor:
                 except Exception as e_json:
                     print(f"OCR_UTILS: Error accessing .json structure for item {i+1}: {e_json}")
 
-                # Fallback or alternative: Check if the object itself is a list of lines (standard PaddleOCR output)
-                # This case should ideally not be hit if type is paddlex.OCRResult and run_ocr.py's method is correct for it.
                 if not item_text and isinstance(res_obj, list):
                     print(f"OCR_UTILS: .json parsing failed or yielded no text for item {i+1}. Trying to parse as list of lines.")
                     current_res_lines_texts: List[str] = []
-                    for line_info in res_obj: # res_obj is a list of line_info
+                    for line_info in res_obj: 
                          if isinstance(line_info, list) and len(line_info) == 2:
                             text_component = line_info[1]
                             if isinstance(text_component, tuple) and len(text_component) == 2:
@@ -118,7 +113,7 @@ class OCRProcessor:
 
 if __name__ == '__main__':
     current_script_dir = os.path.dirname(os.path.abspath(__file__))
-    dummy_image_path = os.path.join(os.path.dirname(current_script_dir), 'screenshot.png') 
+    dummy_image_path = os.path.join(os.path.dirname(current_script_dir), 'sample1.jpg') 
     
     if not os.path.exists(dummy_image_path):
         print(f"Warning: Test image '{dummy_image_path}' not found. OCR processing test will be skipped.")
@@ -132,4 +127,4 @@ if __name__ == '__main__':
             print("--- End of English Text ---")
         else:
             print("No text extracted in English or error occurred.")
-    print(f"\nTest finished. Check output above.")
+    print(f"\nTest finished. Check output above.") 
